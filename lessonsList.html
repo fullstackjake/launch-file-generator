@@ -1,0 +1,432 @@
+<?php
+
+  // to do list:
+  //  - add search by entry id
+  //  - fix paths for different languages
+  //  - create utility to delete old stubfiles folders (rename them stubfiles-delete-1, stubfiles-delete-2, etc)
+
+  define("DEBUGON",true);
+  define("BBREAK","<br />");
+
+  global $debugDivContents;
+  global $subdomain;
+
+  if (DEBUGON) {
+
+    error_reporting(E_ALL);
+    $debugDivContents = "<h2>debug turned on" . BBREAK . "</h2>";
+    $arr = explode(".", $_SERVER['HTTP_HOST'], 2);
+    $subdomain = $arr[0];
+    $debugDivContents .= "server: " . $subdomain . BBREAK;
+
+  }
+
+  // create the setup files directory if there isn't one
+  function createStubfileDirectory () {
+
+    if ( !file_exists('stubfiles') ) {
+      mkdir('stubfiles', 0777);
+    }
+
+  }
+
+  /* creates a compressed zip file */
+  function create_zip($files = array(),$destination = '',$zipDirectoryName,$overwrite = true) {
+
+    global $debugDivContents;
+    global $subdomain;
+
+  	//if the zip file already exists and overwrite is false, return false
+  	if(file_exists($destination) && !$overwrite) {
+    	if (DEBUGON) $debugDivContents .= "folder doesn't exist<br>";
+    	return false;
+    }
+
+    // get files
+  	$valid_files = array();
+  	if(is_array($files)) {
+
+  		foreach($files as $file) {
+
+        if (DEBUGON) $debugDivContents .= "file is " . $file . "<br/>";
+
+  			//make sure the file exists
+  			if(file_exists($file)) {
+  				$valid_files[] = $file;
+  			} else {
+    			echo "file does not exist: " . $file . "<br>";
+  			}
+
+  		}
+
+  	}
+
+  	//if we have good files...
+  	if(count($valid_files)) {
+
+  		//create the archive
+  		$zip = new ZipArchive();
+  		if($zip->open($destination,$overwrite ? ZIPARCHIVE::OVERWRITE : ZIPARCHIVE::CREATE) !== true) {
+    		echo 'failed, code:' . $zip;
+  			return false;
+  		}
+  		//add the files
+  		foreach($valid_files as $file) {
+    		$last = explode("/", $file, 3);
+    		$fileZipDestination = $last[2];
+    		$debugDivContents .= "**file after second slash: " . $last[2] . BBREAK;
+        $debugDivContents .= 'The fileZipDestination: ' . $fileZipDestination . " file: " . $file . BBREAK;
+  			$zip->addFile($file,$fileZipDestination);
+  		}
+      $debugDivContents .= 'The zip archive contains ' . $zip->numFiles . ' files with a status of ' . $zip->status . BBREAK;
+
+  		$zip->close();
+
+      if (DEBUGON) $debugDivContents .= "file created: " . $destination . BBREAK . BBREAK;
+
+      //move file to the stubfiles folder
+      rename($destination,'stubfiles/'.$destination);
+
+  		//check to make sure the file exists
+  		return file_exists('stubfiles/'.$destination);
+  	}
+  	else {
+    	if (DEBUGON) $debugDivContents .= "files are not good<br/>";
+  		return false;
+  	}
+  }
+
+  function createStubFile($siteURL, $urlTitle, $company) {
+
+    global $debugDivContents;
+    global $subdomain;
+
+    // check to see if the folder has been created already. if not, create one and add the files
+    $directoryName = 'stubfiles/' . $urlTitle;
+    if (DEBUGON) $debugDivContents .= 'directory name ' . $directoryName . BBREAK;
+
+    if (!file_exists($directoryName)) {
+
+      mkdir($directoryName, 0777);
+
+      // hit the launch file on the server and save a copy
+        $source = "https://staging.lmscourses.com/index.php?/en-us/launch-course_name/" . $urlTitle . "/lms";
+        if (DEBUGON) $source = "https://" . $subdomain . ".lmscourses.com/index.php?/en-us/launch-course_name/" . $urlTitle . "/lms";
+        $debugDivContents .= 'launch file source ' . $source . BBREAK;
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $source);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_VERBOSE, true);
+        curl_setopt($ch, CURLOPT_ENCODING, 'UTF-8');
+        curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
+        $verbose = fopen('php://temp', 'rw+');
+        curl_setopt($ch, CURLOPT_STDERR, $verbose);
+        $error = curl_error($ch);
+        $data = curl_exec($ch);
+        curl_close($ch);
+
+        if ($data === FALSE) {
+          printf("cUrl error (#%d): %s<br>\n", curl_errno($ch), htmlspecialchars(curl_error($ch)));
+        }
+        rewind($verbose);
+        $verboseLog = stream_get_contents($verbose);
+        //if (DEBUGON) $debugDivContents .= "Verbose information:\n<pre>" . htmlspecialchars($verboseLog) . "</pre>\n";
+
+        $destination = "stubfiles/". $urlTitle . "/launch-" . $urlTitle . ".html";
+        if (DEBUGON) $debugDivContents .= "destination = " . $destination . BBREAK;
+        $file = fopen($destination, "w+");
+        fputs($file, $data);
+        fclose($file);
+
+      // create the manifest file on the server
+        $source = "https://staging.lmscourses.com/index.php?/en-us/imsmanifest/" . $urlTitle . "/lms";
+        if (DEBUGON) $source = "https://" . $subdomain . ".lmscourses.com/index.php?/en-us/imsmanifest/" . $urlTitle . "/lms";
+        if (DEBUGON) $debugDivContents .= BBREAK . BBREAK . 'manifest source: ' . $source . BBREAK;
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $source);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_VERBOSE, true);
+        curl_setopt($ch, CURLOPT_ENCODING, 'UTF-8');
+        curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
+        $verbose = fopen('php://temp', 'rw+');
+        curl_setopt($ch, CURLOPT_STDERR, $verbose);
+        $error = curl_error($ch);
+        $data = curl_exec($ch);
+        if ($data === FALSE) {
+            printf("cUrl error (#%d): %s<br>\n", curl_errno($ch),
+                   htmlspecialchars(curl_error($ch)));
+        }
+        curl_close($ch);
+        rewind($verbose);
+        $verboseLog = stream_get_contents($verbose);
+        //if (DEBUGON) $debugDivContents .= "Verbose information:\n<pre>" . htmlspecialchars($verboseLog) . "</pre>\n";
+
+        $destination = "stubfiles/". $urlTitle . "/imsmanifest.xml";
+        if (DEBUGON) $debugDivContents .= BBREAK . BBREAK . 'manifest destination: ' . $destination . BBREAK;
+        $file = fopen($destination, "w+");
+        fputs($file, trim($data));
+        fclose($file);
+
+      // put the schema file in the lesson folder
+        $source = "https://staging.lmscourses.com/stubfiles-master/schema.xml";
+        if (DEBUGON) $source = "https://" . $subdomain . ".lmscourses.com/stubfiles-master/schema.xml";
+        if (DEBUGON) $debugDivContents .= BBREAK . BBREAK . 'stubfile source: ' . $source . BBREAK;
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $source);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_VERBOSE, true);
+        curl_setopt($ch, CURLOPT_ENCODING, 'UTF-8');
+        curl_setopt($ch, CURLOPT_FTP_CREATE_MISSING_DIRS, true);
+
+        $verbose = fopen('php://temp', 'rw+');
+        curl_setopt($ch, CURLOPT_STDERR, $verbose);
+        $error = curl_error($ch);
+        $data = curl_exec($ch);
+        if ($data === FALSE) {
+            printf("cUrl error (#%d): %s<br>\n", curl_errno($ch),
+                   htmlspecialchars(curl_error($ch)));
+        }
+        curl_close($ch);
+        rewind($verbose);
+        $verboseLog = stream_get_contents($verbose);
+        //if (DEBUGON) $debugDivContents .= "Verbose information:\n<pre>" . htmlspecialchars($verboseLog) . "</pre>\n";
+
+        $destination = "stubfiles/". $urlTitle . "/schema.xml";
+        if (DEBUGON) $debugDivContents .= BBREAK . BBREAK . 'schema destination ' . $destination . BBREAK;
+
+        $file = fopen($destination, "w+");
+        fputs($file, $data);
+        fclose($file);
+
+        // now make the zip file
+          if (DEBUGON) $debugDivContents .= BBREAK . "<h3>creating zip file</h3>" . BBREAK . BBREAK;
+
+          $launchFile = "stubfiles/" . $urlTitle . "/launch-" . $urlTitle . ".html";
+          $imsmanifestFile = "stubfiles/" . $urlTitle . "/imsmanifest.xml";
+          $schemaFile = "stubfiles/" . $urlTitle . "/schema.xml";
+          $archiveName = $urlTitle;
+
+          $files_to_zip = array(
+            $launchFile,
+            $imsmanifestFile,
+            $schemaFile
+          );
+          $result = create_zip($files_to_zip, $archiveName . '.zip', $archiveName, true);
+      }
+
+  } // end createStubFile
+
+
+  createStubfileDirectory();
+
+?>
+{embed="includes/doctype"}
+<head>
+
+  <title>Lessons Report and Setup File Generator</title>
+
+	{embed="includes/htmlHeadMin"}
+
+	<style>
+    .marginBottom10 {
+      margin-bottom: 10px;
+    }
+    .debugDiv {
+      float: right;
+      border: 1px solid red;
+      padding: 10px;
+    }
+    .debugDiv h2 {
+
+    }
+	</style>
+
+	<script type="text/javascript">
+  function doAction(val){
+    //Forward browser to new url with company listed in segement 3
+      window.location= 'https://' +window.location.host + '/index.php?/en-us/lessons/' + val;
+  }
+
+	$(document).ready(function() {
+
+    $(".descriptionLink").click(function(){
+      event.preventDefault();
+      openThis = $(this).attr('id');
+      $("."+openThis).show();
+    });
+
+    var company = '{segment_3}';
+    if (company != '') {
+      $('.company_'+company).show();
+    } else {
+      $('.companyDiv').show();
+    }
+
+	});
+	</script>
+
+</head>
+<body>
+
+
+{if logged_out}
+
+  {exp:member:login_form return="/en-us/lessons"}
+    <h1>Log In</h1>
+    <p class="marginBottom10">You must be logged in to see this page</p>
+    <p class="marginBottom10">
+      <input type="text" name="username" value="" maxlength="32" size="25" placeholder="username">
+    </p>
+    <p class="marginBottom10">
+      <input type="password" name="password" value="" maxlength="32" size="25" placeholder="password">
+    </p>
+    <p><input type="submit" name="submit" value="Submit"></p>
+  {/exp:member:login_form}
+
+{/if}
+
+
+{if logged_in}
+
+	<div class="container">
+
+		<h1>Lessons Report and Setup File Generator</h1>
+
+    {!-- Determine if a company has been chosen already --}
+    {if !segment_3}
+
+      {!-- Choose a company --}
+      <div id="dropdown" style="float:left;width:500px;">
+    		<select onchange="doAction(this.value);">
+      		<option value="">choose a company . . .</option>
+          {exp:channel:entries channel="companies" dynamic="no" sort="asc" orderby="title" limit="100"}
+      		<option value="{url_title}">{title}</option>
+          {/exp:channel:entries}
+    		</select>
+      </div>
+
+    {if:else}  {!-- A company has already been chosen and passed in segment_3 --}
+
+      {!-- Link to start over if needed: --}
+      <p style="font-size:12px;"><a href="{site_url}index.php?/en-us/lessons/">Choose different company</a></p>
+      <br/>
+
+      {!-- Use segment_3 to first open the companies channel, then display only those lessons w/ that company ID --}
+
+      {!-- Open the companies channel --}
+      {exp:channel:entries channel="companies" limit="1000" dynamic="off"}
+
+        {if url_title==segment_3}  {!-- Only show lessons from the selected lesson company --}
+
+        <h1>Lesson listing for {title}</h1>
+        <br/>
+
+          {!-- Open the lessons channel --}
+          {exp:playa:parents channel="lessons" orderby="title" sort="asc" limit="1000" disable="members"}
+
+            {!-- Display title --}
+            <p class="remove-bottom" style="font-weight:bold;margin-left: 15px;">{title}</p>
+
+            {!-- Display entry ID, status, edit link --}
+            <p class="remove-bottom" style="font-weight:normal;margin-left: 15px;">
+              {entry_id} :: {status} &nbsp;&nbsp;:: <a target="_blank" href="{site_url}admin.php?/cp/content_publish/entry_form&&channel_id=2&entry_id={entry_id}">edit</a><br/>
+
+              {!-- Display errors --}
+              {if scorm_lms_target_domain == ''}<span style="color:red;font-weight:bold;">scorm_lms_target_domain variable is missing</span><br/>{/if}
+              {if licensed_content == ''}
+                <span style="color:red;font-weight:bold;">licensed_content variable is missing (should be 'yes' for all lessons)</span><br/>
+              {/if}
+              {if lesson_includes_a_test != 'no' AND lesson_passing_grade == ''}
+                <span style="color:red;font-weight:bold;">lesson_passing_grade variable is missing</span><br/>
+              {/if}
+              {if lesson_includes_a_test != 'no' AND lesson_total_questions == ''}
+                <span style="color:red;font-weight:bold;">lesson_total_questions variable is missing</span><br/>
+              {/if}
+
+              {!-- Display the category for this lesson --}
+              <?php
+                $cat=0;
+              ?>
+              {categories}
+                {if category_name}
+                  <?php
+                    if( $cat != 0){
+                      echo " | ";
+                    }
+                  ?>
+                  {category_name}
+                  <?php
+                    ++$cat;
+                  ?>
+
+                {/if}
+              {/categories}
+              <br/>
+
+              {!-- Display lesson name and launch file name --}
+              {lesson_company}{company_abbreviation}{/lesson_company}-{url_title}<br/>
+              launch-{url_title}.html
+
+            </p>
+
+
+            {!-- Display number of slides, duration, and various links --}
+          	<p class="" style="margin: 5px 0 20px 15px">
+          	  {exp:playa:total_children status="open|no-voiceover"} slides | duration: {lesson_duration}{if lesson_duration:hours}{lesson_duration:hours} hrs {/if} {lesson_duration:minutes} min{/lesson_duration} |
+          	  <a href="{site_url}index.php?/en-us/{url_title}{if status=='no-voiceover'}/no-voiceover{/if}">lesson</a> |
+          	  <a href="{site_url}index.php?/en-us/{url_title}/lms">lesson LMS link</a> |
+          	  {status_notes orderby="row_id" sort="desc" limit="1"}
+              {if status}
+                {if status == "15 COMPLETED"}
+                  <a href="{site_url}stubfiles/{url_title}.zip">setup file zip</a> |
+                  <?php
+                    $urlTitle = '{url_title}';
+                    $company = '{lesson_company}{company_abbreviation}{/lesson_company}';
+                    $siteURL = '{site_url}';
+                    createStubFile($siteURL,$urlTitle,$company);
+                  ?>
+                {if:else}
+                    stub files (will be built when lesson is complete) |
+                {/if}
+              {/if}
+              {/status_notes}
+          	  <a href="{site_url}index.php?/en-us/voiceovers/{url_title}">voiceover script</a> |
+          	  <a href="{site_url}index.php?/reports/images-in-lessons/{segment_3}/{url_title}" target="_blank">images in this lesson</a> |
+          	  <a id="lesson{entry_id}" class="descriptionLink" href="#">lesson description</a>
+          	  <div id="" class="lesson{entry_id}" class="openDescription" style="display:none;background-color:#e3e3e3;width:500px;margin-bottom:20px;margin-top:-10px;padding:10px;">Lesson Description:<br>{lesson_description}</div>
+            </p>
+
+
+
+          {/exp:playa:parents}  {!-- /lessons channel --}
+
+        {/if}  {!-- /if url_title --}
+
+
+      {/exp:channel:entries}  {!-- /companies channel --}
+
+
+    {/if}  {!-- segment_3 --}
+
+	</div><!-- container -->
+{/if}  {!-- logged_in --}
+
+<div class="debugDiv">
+  <?php echo $debugDivContents; ?>
+  created on <?php echo date('l jS \of F Y h:i:s A'); ?>
+</div>
+
+</body>
+</html>
